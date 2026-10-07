@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="PR Bot/PR Bot.csproj" />
+  <Project Path="PRBot.Core/PRBot.Core.csproj" />
+  <Project Path="PRBot.Core.Tests/PRBot.Core.Tests.csproj" />
+</Solution>
