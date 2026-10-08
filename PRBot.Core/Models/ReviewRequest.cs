@@ -12,6 +12,8 @@ public sealed record ReviewRequest(
 {
     public int OllamaContextSize { get; init; }
 
+    public int ReviewRequestTimeoutMinutes { get; init; } = 10;
+
     public ReviewRequest(
         Uri pullRequestUrl,
         string personalAccessToken,

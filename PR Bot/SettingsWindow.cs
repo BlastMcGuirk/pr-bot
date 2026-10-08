@@ -29,6 +29,7 @@ public sealed class SettingsWindow : Window
     private readonly ComboBox _modelSelector = new() { MinWidth = 300, DisplayMemberPath = nameof(ModelInfo.DisplayName) };
     private readonly Button _refreshModelsButton = new() { Content = "Refresh models", Padding = new Thickness(12, 7, 12, 7) };
     private readonly TextBox _ollamaContextSizeBox = new() { MinWidth = 120, Padding = new Thickness(8) };
+    private readonly TextBox _reviewRequestTimeoutBox = new() { MinWidth = 120, Padding = new Thickness(8) };
     private readonly TextBox _instructionsPathBox = new() { Padding = new Thickness(8) };
     private readonly TextBox _instructionsEditor = new() { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 190, Padding = new Thickness(10), FontFamily = new FontFamily("Consolas") };
     private readonly TextBlock _statusText = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center };
@@ -78,6 +79,7 @@ public sealed class SettingsWindow : Window
         }
 
         _ollamaContextSizeBox.Text = _currentSettings.OllamaContextSize.ToString();
+        _reviewRequestTimeoutBox.Text = _currentSettings.ReviewRequestTimeoutMinutes.ToString();
         _instructionsPathBox.Text = _currentSettings.AgentInstructionsPath;
         _hostSelector.SelectionChanged += async (_, _) => await HostChangedAsync();
         _refreshModelsButton.Click += async (_, _) => await RefreshModelsAsync();
@@ -95,6 +97,7 @@ public sealed class SettingsWindow : Window
         modelRow.Children.Add(_modelSelector);
         page.Children.Add(Field("Model", modelRow));
         page.Children.Add(Field("Ollama context size (tokens; 0 = host default)", _ollamaContextSizeBox));
+        page.Children.Add(Field("Review request timeout (minutes)", _reviewRequestTimeoutBox));
         page.Children.Add(_statusText);
 
         page.Children.Add(SectionHeader("Pull request sources"));
@@ -529,6 +532,14 @@ public sealed class SettingsWindow : Window
             return;
         }
 
+        if (!int.TryParse(_reviewRequestTimeoutBox.Text.Trim(), out var reviewRequestTimeoutMinutes)
+            || reviewRequestTimeoutMinutes <= 0
+            || reviewRequestTimeoutMinutes > 71582)
+        {
+            _statusText.Text = "Enter a whole number between 1 and 71582 for the review request timeout in minutes.";
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_instructionsPathBox.Text))
         {
             _statusText.Text = "Choose a path for the AGENTS.md instructions file.";
@@ -558,6 +569,7 @@ public sealed class SettingsWindow : Window
                 SelectedLlmHostId = host.Id,
                 SelectedModelId = modelId,
                 OllamaContextSize = ollamaContextSize,
+                ReviewRequestTimeoutMinutes = reviewRequestTimeoutMinutes,
                 LlmEndpoints = endpoints,
                 AgentInstructionsPath = Path.GetFullPath(_instructionsPathBox.Text.Trim()),
                 PullRequestSources = sourceConfigurations

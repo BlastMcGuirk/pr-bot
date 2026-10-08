@@ -416,7 +416,14 @@ public partial class MainWindow : Window
             var sources = source is null ? Array.Empty<IPullRequestSource>() : [source];
             var reviewService = new PullRequestReviewService(sources, _llmHosts, new DiffOnlyPrReviewAgentFactory());
             var result = suppliedDiff is not null
-                ? await reviewService.ReviewDiffAsync(suppliedDiff, instructions, host.Id, endpoint, _settings.SelectedModelId, _settings.OllamaContextSize)
+                ? await reviewService.ReviewDiffAsync(
+                    suppliedDiff,
+                    instructions,
+                    host.Id,
+                    endpoint,
+                    _settings.SelectedModelId,
+                    _settings.OllamaContextSize,
+                    reviewRequestTimeoutMinutes: _settings.ReviewRequestTimeoutMinutes)
                 : await reviewService.ReviewAsync(new ReviewRequest(
                     pullRequestUrl!,
                     sourceConfiguration!.AuthenticationMethod,
@@ -427,7 +434,8 @@ public partial class MainWindow : Window
                     endpoint,
                     _settings.SelectedModelId)
                 {
-                    OllamaContextSize = _settings.OllamaContextSize
+                    OllamaContextSize = _settings.OllamaContextSize,
+                    ReviewRequestTimeoutMinutes = _settings.ReviewRequestTimeoutMinutes
                 });
             _resultTitle.Text = result.PullRequestTitle;
             _resultCount.Text = result.ActionItems.Count == 1 ? "1 action item" : $"{result.ActionItems.Count} action items";

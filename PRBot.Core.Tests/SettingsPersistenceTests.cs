@@ -22,6 +22,7 @@ public sealed class SettingsPersistenceTests
 
             Assert.Empty(loadedSettings.PullRequestSources);
             Assert.Equal(0, loadedSettings.OllamaContextSize);
+            Assert.Equal(10, loadedSettings.ReviewRequestTimeoutMinutes);
         }
         finally
         {
@@ -42,6 +43,7 @@ public sealed class SettingsPersistenceTests
                 SelectedLlmHostId = "ollama",
                 SelectedModelId = "qwen2.5-coder",
                 OllamaContextSize = 16384,
+                ReviewRequestTimeoutMinutes = 45,
                 LlmEndpoints = new Dictionary<string, string> { ["ollama"] = "http://localhost:11434" },
                 AgentInstructionsPath = Path.Combine(directory, "AGENTS.md"),
                 PullRequestSources =
@@ -63,6 +65,7 @@ public sealed class SettingsPersistenceTests
             Assert.Equal(settings.SelectedLlmHostId, loadedSettings.SelectedLlmHostId);
             Assert.Equal(settings.SelectedModelId, loadedSettings.SelectedModelId);
             Assert.Equal(settings.OllamaContextSize, loadedSettings.OllamaContextSize);
+            Assert.Equal(settings.ReviewRequestTimeoutMinutes, loadedSettings.ReviewRequestTimeoutMinutes);
             Assert.Equal("bitbucket.org", loadedSettings.PullRequestSources.Single().SourceUrl);
             Assert.Equal(SourceAuthenticationMethod.UsernamePassword, loadedSettings.PullRequestSources.Single().AuthenticationMethod);
             Assert.DoesNotContain("personalAccessToken", contents, StringComparison.OrdinalIgnoreCase);

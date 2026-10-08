@@ -84,6 +84,43 @@ public sealed class ReviewServiceTests
         Assert.Equal(new[] { "critical", "low" }, result.ActionItems.Select(item => item.Title));
     }
 
+    [Fact]
+    public async Task ReviewDiffAsync_CancelsAgentWhenReviewRequestTimeoutExpires()
+    {
+        var agent = new BlockingAgent();
+        var service = new PullRequestReviewService(
+            [],
+            [new FakeHost()],
+            new FakeAgentFactory(agent),
+            new ImmediateTimeProvider());
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => service.ReviewDiffAsync(
+            "supplied-local-diff",
+            string.Empty,
+            "test-host",
+            new Uri("http://localhost:1234/v1"),
+            "model"));
+
+        Assert.Contains("10 minutes", exception.Message, StringComparison.Ordinal);
+        Assert.True(agent.CancellationObserved);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(71583)]
+    public async Task ReviewDiffAsync_RejectsInvalidReviewRequestTimeout(int timeoutMinutes)
+    {
+        var service = new PullRequestReviewService([], [new FakeHost()], new FakeAgentFactory(new RecordingAgent([])));
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.ReviewDiffAsync(
+            "supplied-local-diff",
+            string.Empty,
+            "test-host",
+            new Uri("http://localhost:1234/v1"),
+            "model",
+            reviewRequestTimeoutMinutes: timeoutMinutes));
+    }
+
     [Theory]
     [InlineData("ollama", 16384)]
     [InlineData("lm-studio", 0)]
@@ -151,6 +188,46 @@ public sealed class ReviewServiceTests
             ReceivedDiff = diffText;
             ReceivedInstructions = agentInstructions;
             return Task.FromResult(items);
+        }
+    }
+
+    private sealed class BlockingAgent : IPrReviewAgent
+    {
+        public bool CancellationObserved { get; private set; }
+
+        public async Task<IReadOnlyList<ReviewActionItem>> ReviewAsync(string diffText, string agentInstructions, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+
+            return [];
+        }
+    }
+
+    private sealed class ImmediateTimeProvider : TimeProvider
+    {
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            callback(state);
+            return new ImmediateTimer();
+        }
+
+        private sealed class ImmediateTimer : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            public void Dispose()
+            {
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 }

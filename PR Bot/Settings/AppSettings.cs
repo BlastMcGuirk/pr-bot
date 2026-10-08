@@ -10,6 +10,8 @@ public sealed class AppSettings
 
     public int OllamaContextSize { get; set; }
 
+    public int ReviewRequestTimeoutMinutes { get; set; } = 10;
+
     public Dictionary<string, string> LlmEndpoints { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ollama"] = "http://localhost:11434",
