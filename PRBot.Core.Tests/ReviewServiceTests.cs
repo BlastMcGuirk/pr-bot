@@ -53,6 +53,32 @@ public sealed class ReviewServiceTests
             "model")));
     }
 
+    [Fact]
+    public async Task ReviewDiffAsync_ReviewsSuppliedDiffWithoutPullRequestSource()
+    {
+        var diff = "supplied-local-diff";
+        var instructions = "Project-specific review rules";
+        var agent = new RecordingAgent(
+        [
+            Item(ActionItemSeverity.Low, "low"),
+            Item(ActionItemSeverity.Critical, "critical")
+        ]);
+        var service = new PullRequestReviewService([], [new FakeHost()], new FakeAgentFactory(agent));
+
+        var result = await service.ReviewDiffAsync(
+            diff,
+            instructions,
+            "test-host",
+            new Uri("http://localhost:1234/v1"),
+            "model");
+
+        Assert.Equal(diff, agent.ReceivedDiff);
+        Assert.Equal(instructions, agent.ReceivedInstructions);
+        Assert.Null(result.PullRequestUrl);
+        Assert.Equal("Local diff review", result.PullRequestTitle);
+        Assert.Equal(new[] { "critical", "low" }, result.ActionItems.Select(item => item.Title));
+    }
+
     private static ReviewActionItem Item(ActionItemSeverity severity, string title) =>
         new(title, severity, "Description", "Why", "Suggested fix", "file.cs", 3);
 

@@ -33,6 +33,7 @@ public sealed class AppSettingsStore
         }
 
         settings.LlmEndpoints ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        settings.PullRequestSources ??= [];
         settings.LlmEndpoints.TryAdd("ollama", "http://localhost:11434");
         settings.LlmEndpoints.TryAdd("lm-studio", "http://localhost:1234/v1");
         if (string.IsNullOrWhiteSpace(settings.AgentInstructionsPath))

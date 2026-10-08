@@ -1,4 +1,6 @@
 using System.Net.Http;
+using System.IO;
+using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,8 +19,7 @@ public partial class MainWindow : Window
 {
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly AppSettingsStore _settingsStore = new();
-    private readonly DpapiPersonalAccessTokenStore _tokenStore = new();
-    private readonly IPullRequestSource[] _sources;
+    private readonly DpapiSourceCredentialStore _credentialStore = new();
     private readonly ILocalLlmHost[] _llmHosts;
     private readonly DispatcherTimer _messageTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly string[] _waitMessages =
@@ -35,6 +36,14 @@ public partial class MainWindow : Window
         "Separating signal from semicolons...", "Reviewing responsibly. No comments will be posted."
     ];
     private readonly TextBox _urlBox = new() { FontSize = 14, Padding = new Thickness(12, 10, 12, 10), MinWidth = 420 };
+    private readonly TextBox _filePathBox = new() { FontSize = 14, Padding = new Thickness(12, 10, 12, 10), IsReadOnly = true };
+    private readonly TextBox _diffTextBox = new() { FontSize = 13, Padding = new Thickness(12, 10, 12, 10), AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.NoWrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 260, MaxHeight = 320, FontFamily = new FontFamily("Consolas") };
+    private readonly RadioButton _urlModeButton = new() { Content = "URL", GroupName = "ReviewInputMode", IsChecked = true, Margin = new Thickness(0, 0, 20, 0) };
+    private readonly RadioButton _fileModeButton = new() { Content = "File", GroupName = "ReviewInputMode", Margin = new Thickness(0, 0, 20, 0) };
+    private readonly RadioButton _textModeButton = new() { Content = "Text", GroupName = "ReviewInputMode" };
+    private readonly StackPanel _urlInputPanel = new();
+    private readonly StackPanel _fileInputPanel = new();
+    private readonly StackPanel _textInputPanel = new();
     private readonly Button _reviewButton = new() { Content = "Review", FontSize = 15, FontWeight = FontWeights.SemiBold, Padding = new Thickness(22, 12, 22, 12), Background = new SolidColorBrush(Color.FromRgb(103, 80, 164)), Foreground = Brushes.White, BorderThickness = new Thickness(0), Cursor = Cursors.Hand };
     private readonly TextBlock _modelConfigurationText = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray, Margin = new Thickness(0, 0, 0, 18) };
     private readonly Border _progressCard = new() { Visibility = Visibility.Collapsed, Background = Brushes.White, CornerRadius = new CornerRadius(14), Padding = new Thickness(22), Margin = new Thickness(0, 0, 0, 18) };
@@ -47,7 +56,7 @@ public partial class MainWindow : Window
     private readonly TextBlock _resultCount = new() { Foreground = Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _noFindings = new() { Text = "No action items found in this diff.", Visibility = Visibility.Collapsed, Padding = new Thickness(20), Background = Brushes.White, TextWrapping = TextWrapping.Wrap };
     private AppSettings? _settings;
-    private PersonalAccessTokens _tokens = new(string.Empty, string.Empty);
+    private SourceCredentialCollection _credentials = new();
     private int _messageIndex;
 
     public MainWindow()
@@ -60,11 +69,6 @@ public partial class MainWindow : Window
         Background = new SolidColorBrush(Color.FromRgb(250, 248, 252));
         Foreground = new SolidColorBrush(Color.FromRgb(28, 27, 31));
 
-        _sources =
-        [
-            new AzureDevOpsPullRequestSource(_httpClient),
-            new BitbucketPullRequestSource(_httpClient)
-        ];
         _llmHosts =
         [
             new OllamaLlmHost(_httpClient),
@@ -79,6 +83,9 @@ public partial class MainWindow : Window
                 await ReviewAsync();
             }
         };
+        _urlModeButton.Checked += (_, _) => UpdateInputModeVisibility();
+        _fileModeButton.Checked += (_, _) => UpdateInputModeVisibility();
+        _textModeButton.Checked += (_, _) => UpdateInputModeVisibility();
         _messageTimer.Tick += (_, _) =>
         {
             _messageIndex = (_messageIndex + 1) % _waitMessages.Length;
@@ -106,15 +113,38 @@ public partial class MainWindow : Window
 
         var inputCard = CreateCard();
         var inputContent = new StackPanel();
-        inputContent.Children.Add(new TextBlock { Text = "Pull request URL", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+        var inputModes = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
+        inputModes.Children.Add(_urlModeButton);
+        inputModes.Children.Add(_fileModeButton);
+        inputModes.Children.Add(_textModeButton);
+        inputContent.Children.Add(inputModes);
+
+        _urlInputPanel.Children.Add(new TextBlock { Text = "Pull request URL", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+        _urlBox.ToolTip = "Paste an Azure DevOps or Bitbucket pull request URL";
+        _urlInputPanel.Children.Add(_urlBox);
+
+        _fileInputPanel.Children.Add(new TextBlock { Text = "Diff file", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+        var fileRow = new DockPanel { LastChildFill = true };
+        var browseDiffButton = new Button { Content = "Browse...", Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(8, 0, 0, 0) };
+        browseDiffButton.Click += (_, _) => BrowseDiffFile();
+        DockPanel.SetDock(browseDiffButton, Dock.Right);
+        fileRow.Children.Add(browseDiffButton);
+        fileRow.Children.Add(_filePathBox);
+        _fileInputPanel.Children.Add(fileRow);
+
+        _textInputPanel.Children.Add(new TextBlock { Text = "Paste diff text", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+        _textInputPanel.Children.Add(_diffTextBox);
+
+        inputContent.Children.Add(_urlInputPanel);
+        inputContent.Children.Add(_fileInputPanel);
+        inputContent.Children.Add(_textInputPanel);
         var row = new DockPanel { LastChildFill = true };
         _reviewButton.Margin = new Thickness(14, 0, 0, 0);
         DockPanel.SetDock(_reviewButton, Dock.Right);
         row.Children.Add(_reviewButton);
-        _urlBox.ToolTip = "Paste an Azure DevOps or Bitbucket pull request URL";
-        row.Children.Add(_urlBox);
+        row.Children.Add(new Border { Child = new TextBlock { Text = "Your diff stays on this machine and is sent only to your selected local model.", FontSize = 12, Foreground = Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center } });
         inputContent.Children.Add(row);
-        inputContent.Children.Add(new TextBlock { Text = "Your diff stays on this machine and is sent only to your selected local model.", FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(0, 9, 0, 0) });
+        UpdateInputModeVisibility();
         inputCard.Child = inputContent;
         content.Children.Add(inputCard);
 
@@ -154,12 +184,34 @@ public partial class MainWindow : Window
         Margin = new Thickness(0, 0, 0, 18)
     };
 
+    private void UpdateInputModeVisibility()
+    {
+        _urlInputPanel.Visibility = _urlModeButton.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        _fileInputPanel.Visibility = _fileModeButton.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        _textInputPanel.Visibility = _textModeButton.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void BrowseDiffFile()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select a diff file",
+            Filter = "Diff files (*.diff;*.patch)|*.diff;*.patch|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            _filePathBox.Text = dialog.FileName;
+        }
+    }
+
     private async Task LoadSettingsAsync()
     {
         try
         {
             _settings = await _settingsStore.LoadAsync();
-            _tokens = await _tokenStore.LoadAsync();
+            _credentials = await _credentialStore.LoadAsync();
         }
         catch (Exception ex)
         {
@@ -198,11 +250,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        var settingsWindow = new SettingsWindow(_settings, _tokens, _settingsStore, _tokenStore, _llmHosts) { Owner = this };
+        var settingsWindow = new SettingsWindow(_settings, _credentials, _settingsStore, _credentialStore, _llmHosts) { Owner = this };
         if (settingsWindow.ShowDialog() == true)
         {
             _settings = settingsWindow.SavedSettings;
-            _tokens = settingsWindow.SavedTokens ?? _tokens;
+            _credentials = settingsWindow.SavedCredentials ?? _credentials;
             UpdateModelConfigurationStatus();
         }
     }
@@ -210,17 +262,45 @@ public partial class MainWindow : Window
     private async Task ReviewAsync()
     {
         ClearReviewState();
-        if (!Uri.TryCreate(_urlBox.Text.Trim(), UriKind.Absolute, out var pullRequestUrl)
-            || (pullRequestUrl.Scheme != Uri.UriSchemeHttps && pullRequestUrl.Scheme != Uri.UriSchemeHttp))
+        var isUrlMode = _urlModeButton.IsChecked == true;
+        var isFileMode = _fileModeButton.IsChecked == true;
+        Uri? pullRequestUrl = null;
+        string? suppliedDiff = null;
+        if (isUrlMode)
         {
-            ShowError("Enter a valid Azure DevOps or Bitbucket pull request URL.");
-            return;
+            if (!Uri.TryCreate(_urlBox.Text.Trim(), UriKind.Absolute, out pullRequestUrl)
+                || (pullRequestUrl.Scheme != Uri.UriSchemeHttps && pullRequestUrl.Scheme != Uri.UriSchemeHttp))
+            {
+                ShowError("Enter a valid Azure DevOps or Bitbucket pull request URL.");
+                return;
+            }
+        }
+        else if (isFileMode)
+        {
+            if (string.IsNullOrWhiteSpace(_filePathBox.Text))
+            {
+                ShowError("Select a diff file to review.");
+                return;
+            }
+
+            try
+            {
+                suppliedDiff = await System.IO.File.ReadAllTextAsync(_filePathBox.Text);
+            }
+            catch (Exception ex)
+            {
+                ShowError($"Could not read the diff file: {ex.Message}");
+                return;
+            }
+        }
+        else
+        {
+            suppliedDiff = _diffTextBox.Text;
         }
 
-        var source = _sources.SingleOrDefault(candidate => candidate.CanHandle(pullRequestUrl));
-        if (source is null)
+        if (!isUrlMode && string.IsNullOrWhiteSpace(suppliedDiff))
         {
-            ShowError("This URL is not a supported Azure DevOps or Bitbucket pull request.");
+            ShowError("The diff is empty. Select a file or paste diff text before reviewing.");
             return;
         }
 
@@ -230,12 +310,84 @@ public partial class MainWindow : Window
             return;
         }
 
-        var token = source.Id == "azure-devops" ? _tokens.AzureDevOps : _tokens.Bitbucket;
-        if (string.IsNullOrWhiteSpace(token))
+        PullRequestSourceConfiguration? sourceConfiguration = null;
+        IPullRequestSource? source = null;
+        string username = string.Empty;
+        string credential = string.Empty;
+        if (isUrlMode)
         {
-            var sourceName = source.Id == "azure-devops" ? "Azure DevOps" : "Bitbucket";
-            ShowError($"Add a {sourceName} personal access token in Settings.");
-            return;
+            var matchingConfigurations = _settings.PullRequestSources
+                .Where(configuration =>
+                {
+                    try
+                    {
+                        return PullRequestSourceCatalog.GetHost(configuration.SourceUrl)
+                            .Equals(pullRequestUrl!.IdnHost, StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch (ArgumentException)
+                    {
+                        return false;
+                    }
+                })
+                .ToArray();
+            if (matchingConfigurations.Length == 0)
+            {
+                ShowError($"No source is configured for '{pullRequestUrl!.IdnHost}'. Add a matching source URL in Settings.");
+                return;
+            }
+
+            if (matchingConfigurations.Length > 1)
+            {
+                ShowError($"More than one source is configured for '{pullRequestUrl!.IdnHost}'. Remove the duplicate source row in Settings.");
+                return;
+            }
+
+            sourceConfiguration = matchingConfigurations[0];
+            var sourceType = PullRequestSourceCatalog.Find(sourceConfiguration.SourceTypeId);
+            if (sourceType is null)
+            {
+                ShowError($"Source type '{sourceConfiguration.SourceTypeId}' is no longer supported. Update its row in Settings.");
+                return;
+            }
+
+            if (!sourceType.AuthenticationMethods.Contains(sourceConfiguration.AuthenticationMethod))
+            {
+                ShowError($"{sourceType.DisplayName} does not support the configured authentication method.");
+                return;
+            }
+
+            if (!_credentials.Entries.TryGetValue(sourceConfiguration.Id, out var sourceCredentials))
+            {
+                sourceCredentials = new SourceCredential();
+            }
+
+            if (sourceConfiguration.AuthenticationMethod == SourceAuthenticationMethod.PersonalAccessToken)
+            {
+                credential = sourceCredentials.PersonalAccessToken;
+            }
+            else
+            {
+                username = sourceCredentials.Username;
+                credential = sourceCredentials.Password;
+                if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(credential))
+                {
+                    ShowError($"Add both a username and password for {sourceType.DisplayName} in Settings.");
+                    return;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(credential))
+            {
+                ShowError($"Add the configured {sourceConfiguration.AuthenticationMethod} credentials for {sourceType.DisplayName} in Settings.");
+                return;
+            }
+
+            source = PullRequestSourceCatalog.CreateSource(_httpClient, sourceConfiguration);
+            if (!source.CanHandle(pullRequestUrl!))
+            {
+                ShowError($"The URL path is not a supported {sourceType.DisplayName} pull request.");
+                return;
+            }
         }
 
         var host = _llmHosts.SingleOrDefault(candidate => candidate.Id.Equals(_settings.SelectedLlmHostId, StringComparison.OrdinalIgnoreCase));
@@ -261,14 +413,19 @@ public partial class MainWindow : Window
         try
         {
             var instructions = await AppSettingsStore.ReadAgentInstructionsAsync(_settings.AgentInstructionsPath);
-            var reviewService = new PullRequestReviewService(_sources, _llmHosts, new DiffOnlyPrReviewAgentFactory());
-            var result = await reviewService.ReviewAsync(new ReviewRequest(
-                pullRequestUrl,
-                token,
-                instructions,
-                host.Id,
-                endpoint,
-                _settings.SelectedModelId));
+            var sources = source is null ? Array.Empty<IPullRequestSource>() : [source];
+            var reviewService = new PullRequestReviewService(sources, _llmHosts, new DiffOnlyPrReviewAgentFactory());
+            var result = suppliedDiff is not null
+                ? await reviewService.ReviewDiffAsync(suppliedDiff, instructions, host.Id, endpoint, _settings.SelectedModelId)
+                : await reviewService.ReviewAsync(new ReviewRequest(
+                    pullRequestUrl!,
+                    sourceConfiguration!.AuthenticationMethod,
+                    username,
+                    credential,
+                    instructions,
+                    host.Id,
+                    endpoint,
+                    _settings.SelectedModelId));
             _resultTitle.Text = result.PullRequestTitle;
             _resultCount.Text = result.ActionItems.Count == 1 ? "1 action item" : $"{result.ActionItems.Count} action items";
             _noFindings.Visibility = result.ActionItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

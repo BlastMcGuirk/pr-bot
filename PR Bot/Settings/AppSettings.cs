@@ -1,3 +1,5 @@
+using PRBot.Core.Models;
+
 namespace PR_Bot.Settings;
 
 public sealed class AppSettings
@@ -13,4 +15,6 @@ public sealed class AppSettings
     };
 
     public string AgentInstructionsPath { get; set; } = string.Empty;
+
+    public List<PullRequestSourceConfiguration> PullRequestSources { get; set; } = [];
 }

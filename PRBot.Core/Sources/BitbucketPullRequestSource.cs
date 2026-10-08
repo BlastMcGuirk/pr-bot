@@ -6,25 +6,28 @@ using PRBot.Core.Models;
 
 namespace PRBot.Core.Sources;
 
-public sealed class BitbucketPullRequestSource(HttpClient httpClient) : IPullRequestSource
+public sealed class BitbucketPullRequestSource(HttpClient httpClient, string sourceHost = "bitbucket.org") : IPullRequestSource
 {
     private static readonly Regex CloudPullRequestPattern = new(
         @"^/(?<workspace>[^/]+)/(?<repository>[^/]+)/pull-requests/(?<id>\d+)/?$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex DataCenterPullRequestPattern = new(
-        @"^/projects/(?<project>[^/]+)/repos/(?<repository>[^/]+)/pull-requests/(?<id>\d+)/?$",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    public string Id => "bitbucket";
+    public string Id => "bitbucket-cloud";
 
     public bool CanHandle(Uri pullRequestUrl) =>
-        (pullRequestUrl.Host.Equals("bitbucket.org", StringComparison.OrdinalIgnoreCase)
-         && CloudPullRequestPattern.IsMatch(pullRequestUrl.AbsolutePath))
-        || DataCenterPullRequestPattern.IsMatch(pullRequestUrl.AbsolutePath);
+        pullRequestUrl.Host.Equals(sourceHost, StringComparison.OrdinalIgnoreCase)
+        && CloudPullRequestPattern.IsMatch(pullRequestUrl.AbsolutePath);
+
+    public Task<PullRequestDiff> FetchDiffAsync(
+        Uri pullRequestUrl,
+        string personalAccessToken,
+        CancellationToken cancellationToken = default) =>
+        FetchDiffAsync(pullRequestUrl, SourceAuthenticationMethod.PersonalAccessToken, string.Empty, personalAccessToken, cancellationToken);
 
     public async Task<PullRequestDiff> FetchDiffAsync(
         Uri pullRequestUrl,
-        string personalAccessToken,
+        SourceAuthenticationMethod authenticationMethod,
+        string username,
+        string credential,
         CancellationToken cancellationToken = default)
     {
         if (!CanHandle(pullRequestUrl))
@@ -32,27 +35,26 @@ public sealed class BitbucketPullRequestSource(HttpClient httpClient) : IPullReq
             throw new ArgumentException("The URL is not a supported Bitbucket pull request URL.", nameof(pullRequestUrl));
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(personalAccessToken);
-        var isCloud = pullRequestUrl.Host.Equals("bitbucket.org", StringComparison.OrdinalIgnoreCase);
-        var match = (isCloud ? CloudPullRequestPattern : DataCenterPullRequestPattern).Match(pullRequestUrl.AbsolutePath);
-        var diffUrl = isCloud
-            ? new Uri($"https://api.bitbucket.org/2.0/repositories/{match.Groups["workspace"].Value}/{match.Groups["repository"].Value}/pullrequests/{match.Groups["id"].Value}/diff")
-            : new UriBuilder(pullRequestUrl)
-            {
-                Path = pullRequestUrl.AbsolutePath.TrimEnd('/') + ".diff",
-                Query = string.Empty,
-                Fragment = string.Empty
-            }.Uri;
+        var match = CloudPullRequestPattern.Match(pullRequestUrl.AbsolutePath);
+        var diffUrl = new Uri($"https://api.bitbucket.org/2.0/repositories/{match.Groups["workspace"].Value}/{match.Groups["repository"].Value}/pullrequests/{match.Groups["id"].Value}/diff");
 
         using var request = new HttpRequestMessage(HttpMethod.Get, diffUrl);
-        if (isCloud)
+        if (authenticationMethod == SourceAuthenticationMethod.PersonalAccessToken)
         {
-            var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-bitbucket-api-token-auth:{personalAccessToken}"));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+            ArgumentException.ThrowIfNullOrWhiteSpace(credential);
+            var tokenCredentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-bitbucket-api-token-auth:{credential}"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", tokenCredentials);
+        }
+        else if (authenticationMethod == SourceAuthenticationMethod.UsernamePassword)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(username);
+            ArgumentException.ThrowIfNullOrWhiteSpace(credential);
+            var basicCredentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{credential}"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basicCredentials);
         }
         else
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", personalAccessToken);
+            throw new NotSupportedException($"Bitbucket Cloud does not support {authenticationMethod} authentication.");
         }
 
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));

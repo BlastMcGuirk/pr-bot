@@ -1,11 +1,33 @@
 using System.IO;
 using System.Text;
 using PR_Bot.Settings;
+using PRBot.Core.Models;
+using PRBot.Core.Sources;
 
 namespace PRBot.Core.Tests;
 
 public sealed class SettingsPersistenceTests
 {
+    [Fact]
+    public async Task NewSettingsHaveNoConfiguredPullRequestSources()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new AppSettingsStore(Path.Combine(directory, "settings.json"));
+            await store.SaveAsync(new AppSettings { AgentInstructionsPath = Path.Combine(directory, "AGENTS.md") });
+
+            var loadedSettings = await store.LoadAsync();
+
+            Assert.Empty(loadedSettings.PullRequestSources);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task SettingsFilePersistsPreferencesWithoutPersonalAccessTokens()
     {
@@ -19,7 +41,16 @@ public sealed class SettingsPersistenceTests
                 SelectedLlmHostId = "ollama",
                 SelectedModelId = "qwen2.5-coder",
                 LlmEndpoints = new Dictionary<string, string> { ["ollama"] = "http://localhost:11434" },
-                AgentInstructionsPath = Path.Combine(directory, "AGENTS.md")
+                AgentInstructionsPath = Path.Combine(directory, "AGENTS.md"),
+                PullRequestSources =
+                [
+                    new PullRequestSourceConfiguration
+                    {
+                        SourceTypeId = PullRequestSourceCatalog.BitbucketCloudId,
+                        SourceUrl = "bitbucket.org",
+                        AuthenticationMethod = SourceAuthenticationMethod.UsernamePassword
+                    }
+                ]
             };
             await store.SaveAsync(settings);
 
@@ -29,9 +60,10 @@ public sealed class SettingsPersistenceTests
             Assert.Contains("qwen2.5-coder", contents);
             Assert.Equal(settings.SelectedLlmHostId, loadedSettings.SelectedLlmHostId);
             Assert.Equal(settings.SelectedModelId, loadedSettings.SelectedModelId);
+            Assert.Equal("bitbucket.org", loadedSettings.PullRequestSources.Single().SourceUrl);
+            Assert.Equal(SourceAuthenticationMethod.UsernamePassword, loadedSettings.PullRequestSources.Single().AuthenticationMethod);
             Assert.DoesNotContain("personalAccessToken", contents, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("azureDevOps", contents, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("bitbucket", contents, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("secret-value", contents, StringComparison.Ordinal);
         }
         finally
         {
@@ -40,22 +72,26 @@ public sealed class SettingsPersistenceTests
     }
 
     [Fact]
-    public async Task DpapiCredentialStoreRoundTripsTokensWithoutWritingPlaintext()
+    public async Task DpapiCredentialStoreRoundTripsSourceCredentialsWithoutWritingPlaintext()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
-            var filePath = Path.Combine(directory, "credentials.dat");
-            var store = new DpapiPersonalAccessTokenStore(filePath);
-            var tokens = new PersonalAccessTokens("ado-secret-value", "bitbucket-secret-value");
+            var filePath = Path.Combine(directory, "source-credentials.dat");
+            var store = new DpapiSourceCredentialStore(filePath);
+            var rowId = Guid.NewGuid();
+            var credential = new SourceCredential { Username = "private-user", Password = "private-password" };
+            var credentials = new SourceCredentialCollection { Entries = { [rowId] = credential } };
 
-            await store.SaveAsync(tokens);
+            await store.SaveAsync(credentials);
 
             var fileContents = Encoding.UTF8.GetString(await File.ReadAllBytesAsync(filePath));
-            Assert.DoesNotContain(tokens.AzureDevOps, fileContents, StringComparison.Ordinal);
-            Assert.DoesNotContain(tokens.Bitbucket, fileContents, StringComparison.Ordinal);
-            Assert.Equal(tokens, await store.LoadAsync());
+            Assert.DoesNotContain(credential.Username, fileContents, StringComparison.Ordinal);
+            Assert.DoesNotContain(credential.Password, fileContents, StringComparison.Ordinal);
+            var loaded = await store.LoadAsync();
+            Assert.Equal(credential.Username, loaded.Entries[rowId].Username);
+            Assert.Equal(credential.Password, loaded.Entries[rowId].Password);
         }
         finally
         {

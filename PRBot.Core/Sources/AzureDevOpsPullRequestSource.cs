@@ -6,7 +6,7 @@ using PRBot.Core.Models;
 
 namespace PRBot.Core.Sources;
 
-public sealed class AzureDevOpsPullRequestSource(HttpClient httpClient) : IPullRequestSource
+public sealed class AzureDevOpsPullRequestSource(HttpClient httpClient, string sourceHost = "dev.azure.com") : IPullRequestSource
 {
     private static readonly Regex PullRequestPattern = new(
         @"/(?<project>[^/]+)/_git/(?<repository>[^/]+)/pullrequest/(?<id>\d+)(?:/|$)",
@@ -15,13 +15,22 @@ public sealed class AzureDevOpsPullRequestSource(HttpClient httpClient) : IPullR
     public string Id => "azure-devops";
 
     public bool CanHandle(Uri pullRequestUrl) =>
-        (pullRequestUrl.Host.Equals("dev.azure.com", StringComparison.OrdinalIgnoreCase)
-         || pullRequestUrl.Host.EndsWith(".visualstudio.com", StringComparison.OrdinalIgnoreCase))
+        (pullRequestUrl.Host.Equals(sourceHost, StringComparison.OrdinalIgnoreCase)
+         || (sourceHost.Equals("dev.azure.com", StringComparison.OrdinalIgnoreCase)
+             && pullRequestUrl.Host.EndsWith(".visualstudio.com", StringComparison.OrdinalIgnoreCase)))
         && PullRequestPattern.IsMatch(pullRequestUrl.AbsolutePath);
+
+    public Task<PullRequestDiff> FetchDiffAsync(
+        Uri pullRequestUrl,
+        string personalAccessToken,
+        CancellationToken cancellationToken = default) =>
+        FetchDiffAsync(pullRequestUrl, SourceAuthenticationMethod.PersonalAccessToken, string.Empty, personalAccessToken, cancellationToken);
 
     public async Task<PullRequestDiff> FetchDiffAsync(
         Uri pullRequestUrl,
-        string personalAccessToken,
+        SourceAuthenticationMethod authenticationMethod,
+        string username,
+        string credential,
         CancellationToken cancellationToken = default)
     {
         if (!CanHandle(pullRequestUrl))
@@ -29,11 +38,16 @@ public sealed class AzureDevOpsPullRequestSource(HttpClient httpClient) : IPullR
             throw new ArgumentException("The URL is not an Azure DevOps pull request URL.", nameof(pullRequestUrl));
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(personalAccessToken);
+        if (authenticationMethod != SourceAuthenticationMethod.PersonalAccessToken)
+        {
+            throw new NotSupportedException("Azure DevOps supports personal access token authentication only.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(credential);
         var match = PullRequestPattern.Match(pullRequestUrl.AbsolutePath);
         var diffUrl = CreateDiffUrl(pullRequestUrl, match);
         using var request = new HttpRequestMessage(HttpMethod.Get, diffUrl);
-        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($":{personalAccessToken}"));
+        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($":{credential}"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
 

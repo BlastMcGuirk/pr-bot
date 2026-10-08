@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using PRBot.Core.Models;
 using PRBot.Core.Sources;
 
 namespace PRBot.Core.Tests;
@@ -58,6 +59,48 @@ public sealed class SourceAdapterTests
         Assert.Equal("Basic", authorization?.Scheme);
         Assert.Equal(Convert.ToBase64String(Encoding.UTF8.GetBytes("x-bitbucket-api-token-auth:bb-token")), authorization?.Parameter);
         Assert.Equal("diff body", result.DiffText);
+    }
+
+    [Fact]
+    public async Task BitbucketCloudSource_UsesBasicUsernamePasswordAuthentication()
+    {
+        AuthenticationHeaderValue? authorization = null;
+        var source = new BitbucketPullRequestSource(new HttpClient(new CallbackHandler(request =>
+        {
+            authorization = request.Headers.Authorization;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("diff body") };
+        })));
+
+        await source.FetchDiffAsync(
+            new Uri("https://bitbucket.org/team/widgets/pull-requests/17"),
+            SourceAuthenticationMethod.UsernamePassword,
+            "alice",
+            "app-password");
+
+        Assert.Equal("Basic", authorization?.Scheme);
+        Assert.Equal(Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:app-password")), authorization?.Parameter);
+    }
+
+    [Fact]
+    public async Task BitbucketServerSource_UsesConfiguredHostAndSupportsBothAuthMethods()
+    {
+        var authorizationHeaders = new List<AuthenticationHeaderValue?>();
+        var source = new BitbucketServerPullRequestSource(new HttpClient(new CallbackHandler(request =>
+        {
+            authorizationHeaders.Add(request.Headers.Authorization);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("diff body") };
+        })), "stash.example.com");
+        var pullRequestUrl = new Uri("https://stash.example.com/projects/TEAM/repos/widgets/pull-requests/7");
+
+        Assert.True(source.CanHandle(pullRequestUrl));
+        Assert.False(source.CanHandle(new Uri("https://other.example.com/projects/TEAM/repos/widgets/pull-requests/7")));
+        await source.FetchDiffAsync(pullRequestUrl, SourceAuthenticationMethod.PersonalAccessToken, string.Empty, "server-pat");
+        await source.FetchDiffAsync(pullRequestUrl, SourceAuthenticationMethod.UsernamePassword, "alice", "password");
+
+        Assert.Equal("Bearer", authorizationHeaders[0]?.Scheme);
+        Assert.Equal("server-pat", authorizationHeaders[0]?.Parameter);
+        Assert.Equal("Basic", authorizationHeaders[1]?.Scheme);
+        Assert.Equal(Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:password")), authorizationHeaders[1]?.Parameter);
     }
 
     [Fact]
