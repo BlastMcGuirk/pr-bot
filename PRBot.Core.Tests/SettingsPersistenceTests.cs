@@ -21,6 +21,7 @@ public sealed class SettingsPersistenceTests
             var loadedSettings = await store.LoadAsync();
 
             Assert.Empty(loadedSettings.PullRequestSources);
+            Assert.Equal(0, loadedSettings.OllamaContextSize);
         }
         finally
         {
@@ -40,6 +41,7 @@ public sealed class SettingsPersistenceTests
             {
                 SelectedLlmHostId = "ollama",
                 SelectedModelId = "qwen2.5-coder",
+                OllamaContextSize = 16384,
                 LlmEndpoints = new Dictionary<string, string> { ["ollama"] = "http://localhost:11434" },
                 AgentInstructionsPath = Path.Combine(directory, "AGENTS.md"),
                 PullRequestSources =
@@ -60,10 +62,35 @@ public sealed class SettingsPersistenceTests
             Assert.Contains("qwen2.5-coder", contents);
             Assert.Equal(settings.SelectedLlmHostId, loadedSettings.SelectedLlmHostId);
             Assert.Equal(settings.SelectedModelId, loadedSettings.SelectedModelId);
+            Assert.Equal(settings.OllamaContextSize, loadedSettings.OllamaContextSize);
             Assert.Equal("bitbucket.org", loadedSettings.PullRequestSources.Single().SourceUrl);
             Assert.Equal(SourceAuthenticationMethod.UsernamePassword, loadedSettings.PullRequestSources.Single().AuthenticationMethod);
             Assert.DoesNotContain("personalAccessToken", contents, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("secret-value", contents, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SettingsWithoutOllamaContextSizeUseHostDefault()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var settingsPath = Path.Combine(directory, "settings.json");
+            await File.WriteAllTextAsync(settingsPath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                AgentInstructionsPath = Path.Combine(directory, "AGENTS.md")
+            }));
+            var store = new AppSettingsStore(settingsPath);
+
+            var loadedSettings = await store.LoadAsync();
+
+            Assert.Equal(0, loadedSettings.OllamaContextSize);
         }
         finally
         {

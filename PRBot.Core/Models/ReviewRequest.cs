@@ -10,6 +10,8 @@ public sealed record ReviewRequest(
     Uri LlmEndpoint,
     string ModelId)
 {
+    public int OllamaContextSize { get; init; }
+
     public ReviewRequest(
         Uri pullRequestUrl,
         string personalAccessToken,

@@ -35,12 +35,13 @@ public sealed class OllamaLlmHost(HttpClient httpClient) : ILocalLlmHost
             .ToArray();
     }
 
-    public IChatClient CreateChatClient(Uri endpoint, string modelId)
+    public IChatClient CreateChatClient(Uri endpoint, string modelId, int contextSize = 0)
     {
         var client = new OpenAIClient(
             new ApiKeyCredential("ollama"),
             new OpenAIClientOptions { Endpoint = OpenAiEndpoint(endpoint) });
-        return client.GetChatClient(modelId).AsIChatClient();
+        var chatClient = client.GetChatClient(modelId).AsIChatClient();
+        return contextSize > 0 ? new OllamaContextSizeChatClient(chatClient, contextSize) : chatClient;
     }
 
     private static Uri Join(Uri endpoint, string path)
@@ -58,5 +59,36 @@ public sealed class OllamaLlmHost(HttpClient httpClient) : ILocalLlmHost
     {
         var root = endpoint.AbsoluteUri.TrimEnd('/');
         return new Uri(root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? root : $"{root}/v1");
+    }
+}
+
+public sealed class OllamaContextSizeChatClient(IChatClient innerClient, int contextSize) : DelegatingChatClient(innerClient)
+{
+    public override Task<ChatResponse> GetResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        base.GetResponseAsync(messages, AddContextSize(options), cancellationToken);
+
+    public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        base.GetStreamingResponseAsync(messages, AddContextSize(options), cancellationToken);
+
+    private ChatOptions AddContextSize(ChatOptions? options)
+    {
+        if (contextSize <= 0)
+        {
+            return options ?? new ChatOptions();
+        }
+
+        var requestOptions = options?.Clone() ?? new ChatOptions();
+        requestOptions.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+        requestOptions.AdditionalProperties["options"] = new Dictionary<string, object?>
+        {
+            ["num_ctx"] = contextSize
+        };
+        return requestOptions;
     }
 }

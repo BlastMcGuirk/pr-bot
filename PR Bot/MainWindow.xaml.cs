@@ -416,7 +416,7 @@ public partial class MainWindow : Window
             var sources = source is null ? Array.Empty<IPullRequestSource>() : [source];
             var reviewService = new PullRequestReviewService(sources, _llmHosts, new DiffOnlyPrReviewAgentFactory());
             var result = suppliedDiff is not null
-                ? await reviewService.ReviewDiffAsync(suppliedDiff, instructions, host.Id, endpoint, _settings.SelectedModelId)
+                ? await reviewService.ReviewDiffAsync(suppliedDiff, instructions, host.Id, endpoint, _settings.SelectedModelId, _settings.OllamaContextSize)
                 : await reviewService.ReviewAsync(new ReviewRequest(
                     pullRequestUrl!,
                     sourceConfiguration!.AuthenticationMethod,
@@ -425,7 +425,10 @@ public partial class MainWindow : Window
                     instructions,
                     host.Id,
                     endpoint,
-                    _settings.SelectedModelId));
+                    _settings.SelectedModelId)
+                {
+                    OllamaContextSize = _settings.OllamaContextSize
+                });
             _resultTitle.Text = result.PullRequestTitle;
             _resultCount.Text = result.ActionItems.Count == 1 ? "1 action item" : $"{result.ActionItems.Count} action items";
             _noFindings.Visibility = result.ActionItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

@@ -20,22 +20,27 @@ public sealed class ReviewServiceTests
             Item(ActionItemSeverity.Critical, "critical"),
             Item(ActionItemSeverity.High, "high")
         ]);
+        var host = new FakeHost("ollama");
         var service = new PullRequestReviewService(
             [source],
-            [new FakeHost()],
+            [host],
             new FakeAgentFactory(agent));
 
         var result = await service.ReviewAsync(new ReviewRequest(
             pullRequestUrl,
             "pat",
             instructions,
-            "test-host",
+            "ollama",
             new Uri("http://localhost:1234/v1"),
-            "model"));
+            "model")
+        {
+            OllamaContextSize = 16384
+        });
 
         Assert.Equal(diff, agent.ReceivedDiff);
         Assert.Equal(instructions, agent.ReceivedInstructions);
         Assert.Equal(pullRequestUrl, source.RequestedUrl);
+        Assert.Equal(16384, host.ContextSize);
         Assert.Equal(new[] { "critical", "high", "low" }, result.ActionItems.Select(item => item.Title));
     }
 
@@ -79,6 +84,25 @@ public sealed class ReviewServiceTests
         Assert.Equal(new[] { "critical", "low" }, result.ActionItems.Select(item => item.Title));
     }
 
+    [Theory]
+    [InlineData("ollama", 16384)]
+    [InlineData("lm-studio", 0)]
+    public async Task ReviewDiffAsync_PassesContextSizeOnlyToOllama(string hostId, int expectedContextSize)
+    {
+        var host = new FakeHost(hostId);
+        var service = new PullRequestReviewService([], [host], new FakeAgentFactory(new RecordingAgent([])));
+
+        await service.ReviewDiffAsync(
+            "supplied-local-diff",
+            string.Empty,
+            hostId,
+            new Uri("http://localhost:1234/v1"),
+            "model",
+            16384);
+
+        Assert.Equal(expectedContextSize, host.ContextSize);
+    }
+
     private static ReviewActionItem Item(ActionItemSeverity severity, string title) =>
         new(title, severity, "Description", "Why", "Suggested fix", "file.cs", 3);
 
@@ -97,13 +121,19 @@ public sealed class ReviewServiceTests
         }
     }
 
-    private sealed class FakeHost : ILocalLlmHost
+    private sealed class FakeHost(string id = "test-host") : ILocalLlmHost
     {
-        public string Id => "test-host";
+        public string Id => id;
         public string DisplayName => "Test";
         public Uri DefaultEndpoint => new("http://localhost");
         public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(Uri endpoint, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ModelInfo>>([]);
-        public IChatClient CreateChatClient(Uri endpoint, string modelId) => null!;
+        public int? ContextSize { get; private set; }
+
+        public IChatClient CreateChatClient(Uri endpoint, string modelId, int contextSize = 0)
+        {
+            ContextSize = contextSize;
+            return null!;
+        }
     }
 
     private sealed class FakeAgentFactory(IPrReviewAgent agent) : IPrReviewAgentFactory

@@ -28,6 +28,7 @@ public sealed class SettingsWindow : Window
     private readonly TextBox _endpointBox = new() { MinWidth = 360, Padding = new Thickness(8) };
     private readonly ComboBox _modelSelector = new() { MinWidth = 300, DisplayMemberPath = nameof(ModelInfo.DisplayName) };
     private readonly Button _refreshModelsButton = new() { Content = "Refresh models", Padding = new Thickness(12, 7, 12, 7) };
+    private readonly TextBox _ollamaContextSizeBox = new() { MinWidth = 120, Padding = new Thickness(8) };
     private readonly TextBox _instructionsPathBox = new() { Padding = new Thickness(8) };
     private readonly TextBox _instructionsEditor = new() { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 190, Padding = new Thickness(10), FontFamily = new FontFamily("Consolas") };
     private readonly TextBlock _statusText = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center };
@@ -76,6 +77,7 @@ public sealed class SettingsWindow : Window
             _endpointBox.Text = GetEndpoint(selectedHost);
         }
 
+        _ollamaContextSizeBox.Text = _currentSettings.OllamaContextSize.ToString();
         _instructionsPathBox.Text = _currentSettings.AgentInstructionsPath;
         _hostSelector.SelectionChanged += async (_, _) => await HostChangedAsync();
         _refreshModelsButton.Click += async (_, _) => await RefreshModelsAsync();
@@ -92,6 +94,7 @@ public sealed class SettingsWindow : Window
         modelRow.Children.Add(_refreshModelsButton);
         modelRow.Children.Add(_modelSelector);
         page.Children.Add(Field("Model", modelRow));
+        page.Children.Add(Field("Ollama context size (tokens; 0 = host default)", _ollamaContextSizeBox));
         page.Children.Add(_statusText);
 
         page.Children.Add(SectionHeader("Pull request sources"));
@@ -520,6 +523,12 @@ public sealed class SettingsWindow : Window
             return;
         }
 
+        if (!int.TryParse(_ollamaContextSizeBox.Text.Trim(), out var ollamaContextSize) || ollamaContextSize < 0)
+        {
+            _statusText.Text = "Enter a nonnegative whole number for the Ollama context size.";
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_instructionsPathBox.Text))
         {
             _statusText.Text = "Choose a path for the AGENTS.md instructions file.";
@@ -548,6 +557,7 @@ public sealed class SettingsWindow : Window
             {
                 SelectedLlmHostId = host.Id,
                 SelectedModelId = modelId,
+                OllamaContextSize = ollamaContextSize,
                 LlmEndpoints = endpoints,
                 AgentInstructionsPath = Path.GetFullPath(_instructionsPathBox.Text.Trim()),
                 PullRequestSources = sourceConfigurations

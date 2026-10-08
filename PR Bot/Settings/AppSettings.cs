@@ -8,6 +8,8 @@ public sealed class AppSettings
 
     public string SelectedModelId { get; set; } = string.Empty;
 
+    public int OllamaContextSize { get; set; }
+
     public Dictionary<string, string> LlmEndpoints { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ollama"] = "http://localhost:11434",

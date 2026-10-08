@@ -34,7 +34,7 @@ public sealed class LmStudioLlmHost(HttpClient httpClient) : ILocalLlmHost
             .ToArray();
     }
 
-    public IChatClient CreateChatClient(Uri endpoint, string modelId)
+    public IChatClient CreateChatClient(Uri endpoint, string modelId, int contextSize = 0)
     {
         var client = new OpenAIClient(
             new ApiKeyCredential("lm-studio"),

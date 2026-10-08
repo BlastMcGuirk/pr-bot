@@ -37,6 +37,7 @@ public sealed class PullRequestReviewService(
             llmHost,
             request.LlmEndpoint,
             request.ModelId,
+            request.OllamaContextSize,
             cancellationToken);
     }
 
@@ -46,6 +47,7 @@ public sealed class PullRequestReviewService(
         string llmHostId,
         Uri llmEndpoint,
         string modelId,
+        int ollamaContextSize = 0,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(diffText);
@@ -61,6 +63,7 @@ public sealed class PullRequestReviewService(
             llmHost,
             llmEndpoint,
             modelId,
+            ollamaContextSize,
             cancellationToken);
     }
 
@@ -72,9 +75,18 @@ public sealed class PullRequestReviewService(
         ILocalLlmHost llmHost,
         Uri llmEndpoint,
         string modelId,
+        int ollamaContextSize,
         CancellationToken cancellationToken)
     {
-        var chatClient = llmHost.CreateChatClient(llmEndpoint, modelId);
+        if (ollamaContextSize < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ollamaContextSize));
+        }
+
+        var contextSize = llmHost.Id.Equals("ollama", StringComparison.OrdinalIgnoreCase)
+            ? ollamaContextSize
+            : 0;
+        var chatClient = llmHost.CreateChatClient(llmEndpoint, modelId, contextSize);
         var agent = agentFactory.Create(chatClient);
         var items = await agent.ReviewAsync(diffText, agentInstructions, cancellationToken);
         var orderedItems = items

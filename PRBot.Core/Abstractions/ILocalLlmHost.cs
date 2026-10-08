@@ -13,5 +13,5 @@ public interface ILocalLlmHost
 
     Task<IReadOnlyList<ModelInfo>> ListModelsAsync(Uri endpoint, CancellationToken cancellationToken = default);
 
-    IChatClient CreateChatClient(Uri endpoint, string modelId);
+    IChatClient CreateChatClient(Uri endpoint, string modelId, int contextSize = 0);
 }
